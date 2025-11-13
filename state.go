@@ -15,7 +15,6 @@ type AuctionState struct {
 	highestBid    int64
 	highestBidder string
 
-	// last bid per bidder
 	bidderBids map[string]int64
 }
 
@@ -39,20 +38,17 @@ func (s *AuctionState) isFinishedLocked() bool {
 	return time.Since(s.startedAt) >= s.duration
 }
 
-// applyBidLocked assumes the caller holds s.mu.
 func (s *AuctionState) applyBidLocked(bidder string, amount int64) error {
 	if s.isFinishedLocked() {
 		return ErrAuctionFinished
 	}
 
-	// Check bidder's previous bid
 	if prev, ok := s.bidderBids[bidder]; ok {
 		if amount <= prev {
 			return ErrBidTooLow
 		}
 	}
 
-	// Check against highest bid
 	if amount <= s.highestBid {
 		return ErrBidTooLowHighest
 	}

@@ -18,15 +18,14 @@ type Node struct {
 
 	id       int
 	address  string
-	leaderID int // we hard-code leader for now (e.g., 1)
+	leaderID int
 
 	peersMu sync.Mutex
-	peers   map[int]pb.AuctionServiceClient // id -> client
+	peers   map[int]pb.AuctionServiceClient
 
 	state *AuctionState
 }
 
-// NewNode creates a new node with a given duration for the auction.
 func NewNode(id int, addr string, leaderID int, peerAddrs map[int]string, auctionDuration time.Duration) *Node {
 	n := &Node{
 		id:       id,
@@ -36,7 +35,6 @@ func NewNode(id int, addr string, leaderID int, peerAddrs map[int]string, auctio
 		peers:    make(map[int]pb.AuctionServiceClient),
 	}
 
-	// Connect to peers (except self)
 	for pid, paddr := range peerAddrs {
 		if pid == id {
 			continue
@@ -57,10 +55,8 @@ func (n *Node) isLeader() bool {
 	return n.id == n.leaderID
 }
 
-// Bid handles client bids.
 func (n *Node) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, error) {
 	if !n.isLeader() {
-		// Forward to leader
 		n.peersMu.Lock()
 		leaderClient, ok := n.peers[n.leaderID]
 		n.peersMu.Unlock()
@@ -73,11 +69,9 @@ func (n *Node) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, er
 		return leaderClient.Bid(ctx, req)
 	}
 
-	// Leader logic
 	n.state.mu.Lock()
 	defer n.state.mu.Unlock()
 
-	// First, check locally if bid would be accepted (to avoid useless replication)
 	err := n.state.applyBidLocked(req.Bidder, req.Amount)
 	if err != nil {
 		return &pb.BidResponse{
@@ -86,7 +80,6 @@ func (n *Node) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, er
 		}, nil
 	}
 
-	// Now replicate to followers.
 	ok := n.replicateBidToFollowers(ctx, req.Bidder, req.Amount)
 	if !ok {
 		log.Printf("[node %d] replication failed for bid %s:%d", n.id, req.Bidder, req.Amount)
@@ -102,7 +95,6 @@ func (n *Node) Bid(ctx context.Context, req *pb.BidRequest) (*pb.BidResponse, er
 	}, nil
 }
 
-// replicateBidToFollowers sends ReplicateBid to all peers and waits for majority acks.
 func (n *Node) replicateBidToFollowers(ctx context.Context, bidder string, amount int64) bool {
 	n.peersMu.Lock()
 	peersCopy := make(map[int]pb.AuctionServiceClient, len(n.peers))
@@ -111,9 +103,9 @@ func (n *Node) replicateBidToFollowers(ctx context.Context, bidder string, amoun
 	}
 	n.peersMu.Unlock()
 
-	totalNodes := len(peersCopy) + 1 // peers + self
-	needed := totalNodes/2 + 1       // majority
-	acks := 1                        // self already applied
+	totalNodes := len(peersCopy) + 1
+	needed := totalNodes/2 + 1
+	acks := 1
 
 	var wg sync.WaitGroup
 	resCh := make(chan bool, len(peersCopy))
@@ -154,12 +146,10 @@ func (n *Node) replicateBidToFollowers(ctx context.Context, bidder string, amoun
 	return acks >= needed
 }
 
-// ReplicateBid is called by the leader on all followers.
 func (n *Node) ReplicateBid(ctx context.Context, req *pb.ReplicateBidRequest) (*pb.ReplicateBidResponse, error) {
 	n.state.mu.Lock()
 	defer n.state.mu.Unlock()
 
-	// Apply bid using same logic
 	err := n.state.applyBidLocked(req.Bidder, req.Amount)
 	if err != nil {
 		log.Printf("[node %d] ReplicateBid error: %v", n.id, err)
@@ -169,7 +159,6 @@ func (n *Node) ReplicateBid(ctx context.Context, req *pb.ReplicateBidRequest) (*
 	return &pb.ReplicateBidResponse{Ok: true}, nil
 }
 
-// Result returns the current result or highest bid.
 func (n *Node) Result(ctx context.Context, _ *pb.ResultRequest) (*pb.ResultResponse, error) {
 	res := n.state.GetResult()
 

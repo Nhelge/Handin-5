@@ -15,13 +15,6 @@ import (
 	"handin5/pb"
 )
 
-// ====== COMMON: peer parsing ======
-
-/*
-peers flag format:
-
-	"1=127.0.0.1:5001,2=127.0.0.1:5002,3=127.0.0.1:5003"
-*/
 func parsePeers(peersStr string) (map[int]string, error) {
 	res := make(map[int]string)
 	if peersStr == "" {
@@ -43,10 +36,7 @@ func parsePeers(peersStr string) (map[int]string, error) {
 	return res, nil
 }
 
-// ====== CLIENT MODE ======
-
 func runClient(op string, addr string, bidder string, amount int64) {
-	// Connect to a node
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("client: failed to connect to %s: %v", addr, err)
@@ -90,8 +80,6 @@ func runClient(op string, addr string, bidder string, amount int64) {
 	}
 }
 
-// ====== SERVER MODE ======
-
 func runServer(id int, addr string, peersStr string, leaderID int, auctionSeconds int) {
 	peers, err := parsePeers(peersStr)
 	if err != nil {
@@ -116,19 +104,14 @@ func runServer(id int, addr string, peersStr string, leaderID int, auctionSecond
 	}
 }
 
-// ====== MAIN: selects mode ======
-
 func main() {
-	// Mode selector
 	clientMode := flag.Bool("client", false, "run in client mode instead of server mode")
 
-	// Client flags
 	clientOp := flag.String("op", "result", "client operation: 'bid' or 'result'")
 	clientAddr := flag.String("caddr", "127.0.0.1:5001", "server address to connect to (client mode)")
 	clientBidder := flag.String("bidder", "", "bidder name (client mode, op=bid)")
 	clientAmount := flag.Int64("amount", 0, "bid amount (client mode, op=bid)")
 
-	// Server flags
 	id := flag.Int("id", 1, "node id")
 	addr := flag.String("addr", "127.0.0.1:5001", "listen address (server mode)")
 	peersStr := flag.String("peers", "", "peers in form '1=addr1,2=addr2,...' (server mode)")
@@ -138,10 +121,8 @@ func main() {
 	flag.Parse()
 
 	if *clientMode {
-		// Client mode
 		runClient(*clientOp, *clientAddr, *clientBidder, *clientAmount)
 	} else {
-		// Server mode
 		runServer(*id, *addr, *peersStr, *leaderID, *auctionSeconds)
 	}
 }
