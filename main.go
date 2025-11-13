@@ -1,6 +1,7 @@
 ﻿package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -9,11 +10,18 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"handin5/pb"
 )
 
-// peers flag format: "1=127.0.0.1:5001,2=127.0.0.1:5002,3=127.0.0.1:5003"
+// ====== COMMON: peer parsing ======
+
+/*
+peers flag format:
+
+	"1=127.0.0.1:5001,2=127.0.0.1:5002,3=127.0.0.1:5003"
+*/
 func parsePeers(peersStr string) (map[int]string, error) {
 	res := make(map[int]string)
 	if peersStr == "" {
@@ -35,24 +43,66 @@ func parsePeers(peersStr string) (map[int]string, error) {
 	return res, nil
 }
 
-func main() {
-	id := flag.Int("id", 1, "node id")
-	addr := flag.String("addr", "127.0.0.1:5001", "listen address")
-	peersStr := flag.String("peers", "", "peers in form '1=addr1,2=addr2,...'")
-	leaderID := flag.Int("leader", 1, "id of leader node")
-	auctionSeconds := flag.Int("duration", 100, "auction duration in seconds")
-	flag.Parse()
+// ====== CLIENT MODE ======
 
-	peers, err := parsePeers(*peersStr)
+func runClient(op string, addr string, bidder string, amount int64) {
+	// Connect to a node
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatalf("client: failed to connect to %s: %v", addr, err)
+	}
+	defer conn.Close()
+
+	c := pb.NewAuctionServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	switch strings.ToLower(op) {
+	case "bid":
+		if bidder == "" {
+			log.Fatalf("client: bidder must be set for op=bid")
+		}
+		if amount <= 0 {
+			log.Fatalf("client: amount must be > 0 for op=bid")
+		}
+		resp, err := c.Bid(ctx, &pb.BidRequest{
+			Bidder: bidder,
+			Amount: amount,
+		})
+		if err != nil {
+			log.Fatalf("client: Bid RPC error: %v", err)
+		}
+		fmt.Printf("Bid response: status=%s, message=%q\n", resp.Status.String(), resp.Message)
+
+	case "result":
+		resp, err := c.Result(ctx, &pb.ResultRequest{})
+		if err != nil {
+			log.Fatalf("client: Result RPC error: %v", err)
+		}
+		fmt.Printf("Result:\n")
+		fmt.Printf("  finished      = %v\n", resp.Finished)
+		fmt.Printf("  highestBidder = %q\n", resp.HighestBidder)
+		fmt.Printf("  highestAmount = %d\n", resp.HighestAmount)
+		fmt.Printf("  message       = %q\n", resp.Message)
+
+	default:
+		log.Fatalf("client: unknown op=%q (use 'bid' or 'result')", op)
+	}
+}
+
+// ====== SERVER MODE ======
+
+func runServer(id int, addr string, peersStr string, leaderID int, auctionSeconds int) {
+	peers, err := parsePeers(peersStr)
 	if err != nil {
 		log.Fatalf("failed to parse peers: %v", err)
 	}
 
-	log.Printf("[node %d] starting at %s, leader=%d, duration=%ds", *id, *addr, *leaderID, *auctionSeconds)
+	log.Printf("[node %d] starting at %s, leader=%d, duration=%ds", id, addr, leaderID, auctionSeconds)
 
-	node := NewNode(*id, *addr, *leaderID, peers, time.Duration(*auctionSeconds)*time.Second)
+	node := NewNode(id, addr, leaderID, peers, time.Duration(auctionSeconds)*time.Second)
 
-	lis, err := net.Listen("tcp", *addr)
+	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -60,8 +110,38 @@ func main() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterAuctionServiceServer(grpcServer, node)
 
-	log.Printf("[node %d] gRPC server listening on %s", *id, *addr)
+	log.Printf("[node %d] gRPC server listening on %s", id, addr)
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
+	}
+}
+
+// ====== MAIN: selects mode ======
+
+func main() {
+	// Mode selector
+	clientMode := flag.Bool("client", false, "run in client mode instead of server mode")
+
+	// Client flags
+	clientOp := flag.String("op", "result", "client operation: 'bid' or 'result'")
+	clientAddr := flag.String("caddr", "127.0.0.1:5001", "server address to connect to (client mode)")
+	clientBidder := flag.String("bidder", "", "bidder name (client mode, op=bid)")
+	clientAmount := flag.Int64("amount", 0, "bid amount (client mode, op=bid)")
+
+	// Server flags
+	id := flag.Int("id", 1, "node id")
+	addr := flag.String("addr", "127.0.0.1:5001", "listen address (server mode)")
+	peersStr := flag.String("peers", "", "peers in form '1=addr1,2=addr2,...' (server mode)")
+	leaderID := flag.Int("leader", 1, "id of leader node (server mode)")
+	auctionSeconds := flag.Int("duration", 100, "auction duration in seconds (server mode)")
+
+	flag.Parse()
+
+	if *clientMode {
+		// Client mode
+		runClient(*clientOp, *clientAddr, *clientBidder, *clientAmount)
+	} else {
+		// Server mode
+		runServer(*id, *addr, *peersStr, *leaderID, *auctionSeconds)
 	}
 }
