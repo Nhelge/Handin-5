@@ -1,0 +1,49 @@
+﻿syntax = "proto3";
+
+package auction;
+
+// Go module: handin5
+// Folder: pb
+option go_package = "handin5/pb;pb";
+
+service AuctionService {
+  // Client API
+  rpc Bid(BidRequest) returns (BidResponse);
+  rpc Result(ResultRequest) returns (ResultResponse);
+
+  // Internal replication RPC (leader -> followers)
+  rpc ReplicateBid(ReplicateBidRequest) returns (ReplicateBidResponse);
+}
+
+message BidRequest {
+  string bidder = 1;
+  int64 amount = 2;
+}
+
+message BidResponse {
+  enum Status {
+    FAIL = 0;
+    SUCCESS = 1;
+    EXCEPTION = 2;
+  }
+  Status status = 1;
+  string message = 2;
+}
+
+message ResultRequest {}
+
+message ResultResponse {
+  bool finished = 1;
+  string highestBidder = 2;
+  int64 highestAmount = 3;
+  string message = 4;
+}
+
+message ReplicateBidRequest {
+  string bidder = 1;
+  int64 amount = 2;
+}
+
+message ReplicateBidResponse {
+  bool ok = 1;
+}
